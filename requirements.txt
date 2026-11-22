@@ -1,0 +1,83 @@
+# ============================================================
+# 装法(Windows,官方源慢,一律走清华镜像)
+#   python -m venv .venv
+#   .venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# ⚠️ 这份清单是**照着源码实际 import 补齐过的** —— 之前漏了 8 个包
+#    (onnxruntime / tokenizers / sherpa-onnx / windows-capture /
+#     rapidocr-onnxruntime / opencv-python / Pillow / dashscope),
+#    照旧版装会在跑到视觉、声纹、云端 TTS 时才炸,而且报错点离原因很远。
+# ============================================================
+
+# ============================================================
+# 阶段 1:OSC 通路验证(main.py osc)
+# ============================================================
+python-osc>=1.8.3
+
+# ============================================================
+# 阶段 2:LLM 纯文字对话(main.py chat)
+# 大脑走阿里云百炼的 OpenAI 兼容接口(用官方 openai SDK 指到它的 base_url)
+# ============================================================
+openai>=1.50.0
+pyyaml>=6.0
+
+# ============================================================
+# 阶段 3:音频 I/O + TTS(main.py tts / run)
+# ============================================================
+sounddevice>=0.4.6      # 普通输入/输出设备
+pyaudiowpatch>=0.2.12   # WASAPI 回环采集。sounddevice 自带的 PortAudio 没编译回环,
+                        # 必须靠这个才能抓「扬声器正在播什么」
+soundfile>=0.12.1       # 读写音频;libsndfile 1.2+ 自带 MP3 解码,不需要 ffmpeg
+soxr>=0.3.7             # 重采样 48k -> 16k(Whisper 只吃 16k)
+numpy>=1.24
+edge-tts>=6.1.9         # 免费 TTS(注意:联网合成,不是本地)
+
+# 云端音色克隆(backend=cosyvoice)。
+# ⚠️ 只加这一个包就够 —— 不要试图用 openai SDK 打百炼的 /audio/speech,
+#    那个端点在兼容接口上**不存在(实测 404)**。官方 SDK 是唯一走通的通道。
+dashscope>=1.27.7
+
+# ============================================================
+# 阶段 4:语音识别(main.py asr / run)
+# 注意:faster-whisper 会拉 ctranslate2 / onnxruntime / av,首次装约 200-400MB
+# ⚠️ 当前 config.yaml 是 asr.backend=cloud(走百炼),本地模型根本不加载 ——
+#    但**包还是要装**:asr.py 是延迟 import,一旦云端失败退回本地就会用到。
+# ============================================================
+faster-whisper>=1.0.3
+
+# ============================================================
+# 阶段 5:视觉 + 记忆 + 声纹(跟随 / 认主人 / 记得住事)
+# ============================================================
+onnxruntime>=1.17       # 名牌 YOLO + 向量记忆都走它。
+                        # ⚠️ **装 CPU 版就行** —— 要跑 GPU 得换 onnxruntime-gpu
+                        #    再补 nvidia-cublas-cu12/nvidia-cudnn-cu12(见文件末尾)。
+                        #    YOLO 在 CPU 上 34ms/帧已经够用,跟随是 10Hz 闭环。
+tokenizers>=0.15        # 向量记忆(BGE-small-zh)的分词器
+sherpa-onnx>=1.10       # 声纹 CAM++(判断"是不是主人说的"),纯 CPU
+windows-capture>=1.4    # 抓 VRChat 窗口画面。
+                        # ⚠️ PrintWindow 对 VRChat 已失效(DXGI flip-model),
+                        #    四种 flag 全返回 0,只能走 Windows.Graphics.Capture
+rapidocr-onnxruntime>=1.3   # OCR 读名牌(慢但"知是谁",YOLO 快的替代路线)
+opencv-python>=4.8      # rapidocr 的依赖(装它会自动带上,显式列出以防被裁)
+Pillow>=10.0            # 图像处理(截图的缩放/编码)
+av>=12.0                # PyAV:解码 m4a/AAC 等容器。
+                        # ⚠️ **它自带 ffmpeg 库,所以本机不需要装系统 ffmpeg**。
+                        #    tools/make_ref_audio.py 靠它解 B 站下下来的音轨。
+
+# ============================================================
+# 🔴 以下**只在需要 GPU 加速时**才装,默认不要装
+#
+# 迁到 GTX1060 6G 那种小显存机器时,**一个都别装** —— 装了纯占地方:
+#   · 当前 asr.backend 已是 cloud,本地 Whisper 不加载 -> 不需要 CUDA DLL
+#   · YOLO 本来就在 CPU 上跑(34ms/帧),装 GPU 版反而多一堆 DLL 依赖
+#   · 显存要全留给 VRChat + SteamVR
+# ============================================================
+# nvidia-cublas-cu12        # ctranslate2 / onnxruntime 的 CUDA 依赖(~1.3GB,全进 venv)
+# nvidia-cudnn-cu12
+# onnxruntime-gpu           # 换掉上面的 onnxruntime。⚠️ 装了也别以为在跑 GPU ——
+#                           # 缺 DLL 时 onnxruntime 会**静默退回 CPU**,必须打印
+#                           # 实际 provider 才知道(detect.py 已经打了)
+#
+# 附:GPT-SoVITS(本地克隆 TTS)有**独立的 venv**,不在本文件里。
+#     它的 requirements 钉 numpy<2.0,和本工程冲突,必须分开。
+#     backend=cosyvoice 之后本地那套不再需要启动,但目录留着做断网兜底。
